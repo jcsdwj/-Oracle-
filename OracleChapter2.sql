@@ -185,3 +185,32 @@ ALTER system flush shared_pool;
 
 -- set timing on
 insert into t select rownum from dual connect by level<=10000000;
+
+drop table t purge;
+
+alter system flush shared_pool;
+
+set timing on
+create table t as select rownum x from dual connect by level <= 1000000; -- 1.533
+
+-- 修改pga大小（但没有解决存储空间不够的问题）
+show parameter sga;
+show parameter pga;
+alter system set pga_aggregate_target='4G' scope=both;
+alter system set sga_max_size='4G' scope=both;
+alter system set sga_target='4G' scope=both;
+
+alter system set sga_max_size='3G' scope=spfile;
+alter system set sga_target='3G' scope=spfile;
+alter system set pga_aggregate_target='3G' scope=spfile;
+
+shutdown immediate ;
+startup ;
+
+-- 2.3.27 并行插入
+drop table t purge;
+alter system flush shared_pool;
+
+set timing on
+create table t nologging parallel 16
+as select rownum x from dual connect by level<=1000000; -- 0.921秒
