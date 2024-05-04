@@ -163,3 +163,148 @@ segment space management auto;
 create tablespace TBS_LJB3
 datafile 'D:\Oracle\oradata\ORCL\TBS_LJB3_01.DBF' size 100M
 autoextend on next 64k maxsize 5G;
+
+-- 3-23 查看数据库当前所在回滚段
+-- undo_management的取值为auto表示是系统自动管理表空间而不是手动
+show parameter undo;
+
+-- 3-24 查看数据库有几个回滚段
+select tablespace_name,status from dba_tablespaces where contents='UNDO';
+
+-- 3-25 查看数据库有几个回滚段，并得出大小
+select tablespace_name,sum(bytes)/1024/1024 from dba_data_files
+where tablespace_name in ('UNDOTBS1','UNDOTBS2')
+group by tablespace_name;
+
+-- 3-26 切换回滚表空间
+alter system set undo_tablespace = undotbs2 scope = both;
+
+-- 出现 write to SPFILE requested but no SPFILE is in use
+-- pfile和spfile的区别
+
+-- 3-29 查看临时表空间大小
+select tablespace_name, sum(bytes)/1024/1024 from dba_temp_files
+group by tablespace_name;
+
+-- 3-31 查看用户的默认表空间和临时表空间
+select default_tablespace,temporary_tablespace from dba_users where username='LJB';
+
+-- 3-32 查看其他用户的临时表空间
+select default_tablespace,temporary_tablespace from dba_users where username='SYSTEM';
+
+-- 3-34 不同用户在不同临时表空间的分配情况
+select temporary_tablespace,count(*) from dba_users
+group by temporary_tablespace;
+
+-- 3-37 查询临时表空间情况
+select * from dba_tablespace_groups;
+
+-- 3-38 新建临时表空间组
+create temporary tablespace temp1_1 tempfile 'D:\Oracle\oradata\ORCL\TMP1_1.DBF' size 100M
+tablespace group tmp_grp1
+;
+create temporary tablespace temp1_2 tempfile 'D:\Oracle\oradata\ORCL\TMP1_2.DBF' size 100M
+tablespace group tmp_grp1
+;
+create temporary tablespace temp1_3 tempfile 'D:\Oracle\oradata\ORCL\TMP1_3.DBF' size 100M
+tablespace group tmp_grp1
+;
+
+-- 3-48 分别建统一尺寸和自动扩展的两个表空间
+set timing on
+create tablespace TBS_LJB_A
+datafile 'D:\Oracle\oradata\ORCL\TBS_LJB_A_01_01.DBF' size 1M
+autoextend on uniform size 64k;
+
+create tablespace TBS_LJB_B
+datafile 'D:\Oracle\oradata\ORCL\TBS_LJB_B_01_01.DBF' size 2G;
+
+-- 3-49 分别在两个不同表空间建表
+set timing on
+create table t_a(id int) tablespace TBS_LJB_A;
+create table t_b(id int) tablespace TBS_LJB_B;
+
+-- 3-50 分别比较插入的速度差异
+insert into t_a select rownum from dual connect by level <= 1000000; -- 1.218s
+insert into t_b select rownum from dual connect by level <= 1000000; -- 0.82s
+
+-- 3-51 速度差异原因（表空间申请扩大空间花费大量时间）
+select count(*) from user_extents where segment_name='T_A'; -- 扩展194次
+select count(*) from user_extents where segment_name='T_B'; -- 扩展28次
+
+-- 3-52 表在uniform为64k的tablespace的插入情况
+create tablespace TBS_LJB_C
+datafile 'D:\Oracle\oradata\ORCL\TBS_LJB_C_01.DBF' size 2G
+autoextend on uniform size 64k;
+
+create table t_c(id int) tablespace TBS_LJB_C;
+
+insert into t_c select rownum from dual connect by level<=1000000; -- 0.78s
+
+-- 3-53 PCTFREE 试验准备之建表
+drop table employees purge;
+create table employees as select * from HR.employees;
+desc employees;
+
+-- 3-54 PCTFREE 试验准备之扩大字段
+alter table employees modify first_name varchar2(2000);
+alter table employees modify last_name varchar2(2000);
+alter table employees modify email varchar2(2000);
+alter table employees modify phone_number varchar2(2000);
+
+-- 3-55 更新表
+update employees set first_name = LPAD('1',2000,'*'),
+last_name = LPAD('1',2000,'*'),email = lpad('1',2000,'*'),
+phone_number=lpad('1',2000,'*');
+
+-- 3-62 块的大小应用环境（分别建8k和16k的表空间）
+drop tablespace TBS_LJB INCLUDING CONTENTS AND DATAFILES;
+create tablespace TBS_LJB 
+datafile 'D:\Oracle\oradata\ORCL\TBS_LJB_01.DBF' size 1G;
+
+drop tablespace TBS_LJB_16K including CONTENTS AND DATAFILES;
+create tablespace TBS_LJB_16K
+blocksize 16K
+datafile 'D:\Oracle\oradata\ORCL\TBS_LJB_16k_01.DBF' size 1G;
+
+-- 3-63 块的大小应用准备工作（在16k表空间建表）
+drop table t_16k purge;
+create table t_16k tablespace tbs_ljb_16k as select * from dba_objects;
+insert into t_16k select * from t_16k;
+insert into t_16k select * from t_16k;
+insert into t_16k select * from t_16k;
+insert into t_16k select * from t_16k;
+insert into t_16k select * from t_16k;
+
+insert into t_16k select * from t_16k;
+commit;
+
+create index idx_object_id on t_16k(object_id);
+
+-- 3-64 块的大小应用准备工作（在8K表空间建表）
+drop table t_8k purge;
+create table t_8k tablespace tbs_ljb as select * from dba_objects;
+insert into t_8k select * from t_8k;
+insert into t_8k select * from t_8k;
+insert into t_8k select * from t_8k;
+insert into t_8k select * from t_8k;
+insert into t_8k select * from t_8k;
+insert into t_8k select * from t_8k;
+commit;
+update t_8k set object_id = rownum;
+commit;
+create index idx_object_id_8k on t_8k(object_id);
+
+-- 3-65 BLOCK为16K的表空间全表扫描性能
+set autotrace on
+set linesize 1000
+set timing on
+select count(*) from t_16k;
+
+-- 3-66 BLOCK为8K的表空间的全表扫描性能
+select count(*) from t_8k;
+
+-- 3-67,68 block为8K和16K的表空间索引读性能
+select * from t_8k where object_id=29;
+select * from t_16k where object_id=29;
+
