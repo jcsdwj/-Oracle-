@@ -151,3 +151,82 @@ set linesize 1000
 select index_name,blevel,leaf_blocks,num_rows,
 distinct_keys,clustering_factor from user_ind_statistics
 where table_name in ('T_COLOCATED','T_DISORGANIZED');
+
+-- 5-48 DISTINCT 测试准备
+drop table t purge;
+create table t as select * from dba_objects;
+alter table t modify object_id not null;
+update t set object_id=2;
+update t set object_id=3 where rownum<=25000;
+
+-- 5-49 DISTINCT会产生排序
+set autotrace traceonly
+select distinct object_id from t; -- cost 622
+
+-- 5-50 不加distinct
+select object_id from t; -- cost 296
+
+-- 5-52 为t表构建索引
+create index idx_t_object_id on t(object_id);
+
+-- 无关排序走INDEX FAST FULL SCAN 需要排序INDEX FULL SCAN
+
+-- 5-56 UNION 需要排序
+drop table t1 purge;
+create table t1 as select * from dba_objects;
+alter table t1 modify object_id not null;
+update t1 set object_id=-1 where object_id is null;
+drop table t2 purge;
+create table t2 as select * from dba_objects;
+update t2 set object_id=-1 where object_id is null;
+alter table t2 modify object_id not null;
+
+set linesize 1000
+set autotrace traceonly
+select object_id from t1
+union
+select object_id from t2;
+
+-- 5-59 外键索引性能研究准备
+drop table t_p cascade constraints purge;
+drop table t_c cascade constraints purge;
+create table t_p(id number,name varchar2(500));
+alter table t_p add constraint t_p_id_pk primary key(id);
+create table t_c(id number,fid number,name varchar2(500));
+alter table t_c add constraint fk_t_c foreign key(fid) references t_p(id);
+insert into t_p select rownum,table_name from all_tables;
+insert into t_c select rownum,mod(rownum,1000)+1,object_name from all_objects;
+
+-- 5-61 外键建索引
+create index ind_t_c_fid on t_c(fid);
+select a.id,a.name,b.name from t_p a,t_c b where a.id=b.fid and a.id=880;
+
+-- 5-62 
+select sid from v$mystat where rownum=1;
+delete t_p where id=2000;
+
+-- 5-63 删除外键索引
+drop index ind_t_c_fid;
+
+-- 5-64 确实卡住了
+
+-- 5-70 在T表的ID列建普通索引
+drop table t cascade constraints purge;
+create table t(id number,name varchar2(30));
+insert into t select rownum,table_name from all_tables;
+
+create index idx_t_id on t(id);
+
+-- 5-71 为ID列增加主键约束
+alter table t add constraint t_id_pk primary key(id);
+
+-- 5-72 观察object_id,object_type顺序的组合索引
+drop table t purge;
+create table t as select * from dba_objects;
+create index idx1_object_id on t(object_id,object_type);
+create index idx2_object_id on t(object_type,object_id);
+
+select /*+index(t,idx1_object_id)*/ * from t where object_id=20 and object_type='TABLE';
+select /*+index(t,idx2_object_id)*/ * from t where object_id=20 and object_type='TABLE';
+-- 二者效率一样 等值查询情况，组合索引的列无论哪一列在前性能都一样
+-- 组合索引的两列，当一列是范围查询，一列是等值查询，等值查询在前，范围查询在后，这样的索引效率最高
