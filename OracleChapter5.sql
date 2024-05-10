@@ -230,3 +230,43 @@ select /*+index(t,idx1_object_id)*/ * from t where object_id=20 and object_type=
 select /*+index(t,idx2_object_id)*/ * from t where object_id=20 and object_type='TABLE';
 -- 二者效率一样 等值查询情况，组合索引的列无论哪一列在前性能都一样
 -- 组合索引的两列，当一列是范围查询，一列是等值查询，等值查询在前，范围查询在后，这样的索引效率最高
+
+-- 5-86 索引监控的查询脚本
+-- 对需要跟踪的索引进行监控
+-- alter index 索引名 monitoring usage;
+-- 通过观察v$object_usage 进行跟踪
+select * from v$object_usage;
+drop table t purge;
+create table t as select * from dba_objects;
+create index idx_t_id on t(object_id);
+create index idx_t_name on t(object_name);
+
+-- 5-87 索引监控的实施
+alter index idx_t_id monitoring usage; -- nomonitoring为不监控
+alter index idx_t_name monitoring usage;
+set linesize 166
+col INDEX_ANME for a10
+col TABLE_NAME for a10
+col MONITORING for a10
+col USED for a10
+col START_MONITORING for a25
+col END_MONITORING for a25
+select * from v$object_usage; 
+
+-- 5-89 位图索引跟踪准备
+drop table t purge;
+create table t as select * from dba_objects;
+insert into t select * from t; -- 2,330,080 行已插入
+
+-- 5-90 全表扫描代价
+select count(*) from t; -- 396
+
+-- 5-91 普通索引代价
+create index idx_t_obj on t(object_id);
+alter table t modify object_id not null;
+update t set object_id=-1 where object_id is null;
+select count(*) from t; -- 396 没影响？ 
+
+-- 5-92 位图索引的代价
+create bitmap index idx_bitm_t_status on t(status);
+select count(*) from t; -- 104
