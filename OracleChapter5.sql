@@ -270,3 +270,15 @@ select count(*) from t; -- 396 没影响？
 -- 5-92 位图索引的代价
 create bitmap index idx_bitm_t_status on t(status);
 select count(*) from t; -- 104
+
+-- 5-107 函数索引准备
+drop table t purge;
+create table t as select * from dba_objects;
+create index idx_object_id1 on t(object_id);
+create index idx_object_name on t(object_name);
+create index idx_created on t(created);
+select count(*) from t;
+
+-- 5-112 比较写法性能差异
+select * from t where object_id-10<=30; -- 全表扫描
+select * from t where object_id<=40;
